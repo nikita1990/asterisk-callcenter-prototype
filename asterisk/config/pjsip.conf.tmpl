@@ -1,0 +1,137 @@
+; =====================================================================
+;  PJSIP: транспорт, SIP-транк к провайдеру, абоненты (агенты call-центра)
+;  Шаблон: переменные вида $VAR в фигурных скобках подставляет entrypoint.sh из .env
+; =====================================================================
+
+[global]
+type = global
+user_agent = Prototype-PBX
+; сначала ищем по IP (провайдер), потом по username из From (агенты).
+; anonymous нет — неизвестные вызовы отбиваются 401/403.
+endpoint_identifier_order = ip,username
+
+[transport-udp]
+type = transport
+protocol = udp
+bind = 0.0.0.0:5060
+
+
+; =====================================================================
+;  SIP-ТРАНК "carrier"
+;  Входящие: провайдер опознаётся по IP (identify).
+;  Исходящие: провайдер отвечает 401, Asterisk повторяет INVITE с digest (outbound_auth).
+; =====================================================================
+
+[carrier]
+type = endpoint
+transport = transport-udp
+context = from-trunk
+disallow = all
+allow = alaw,ulaw
+aors = carrier
+outbound_auth = carrier-auth
+from_user = ${TRUNK_USERNAME}
+from_domain = ${TRUNK_HOST}
+direct_media = no
+dtmf_mode = rfc4733
+rtp_symmetric = yes
+; в From уходит логин транка (from_user), а номер АОН — в P-Asserted-Identity
+send_pai = yes
+trust_id_inbound = no
+; не слать провайдеру re-INVITE/UPDATE при смене "кто на линии" (ответил агент 102 и т.п.):
+; многие операторы такие re-INVITE не принимают
+send_connected_line = no
+
+[carrier]
+type = aor
+contact = sip:${TRUNK_HOST}:${TRUNK_PORT}
+; SIPp-провайдер не отвечает на OPTIONS; у реального провайдера включить 30-60 с
+qualify_frequency = 0
+
+[carrier-auth]
+type = auth
+auth_type = userpass
+username = ${TRUNK_USERNAME}
+password = ${TRUNK_PASSWORD}
+
+[carrier-identify]
+type = identify
+endpoint = carrier
+match = ${TRUNK_HOST}
+
+; У провайдера с регистрацией (а не по IP) добавляется:
+;[carrier-reg]
+;type = registration
+;transport = transport-udp
+;outbound_auth = carrier-auth
+;server_uri = sip:${TRUNK_HOST}:${TRUNK_PORT}
+;client_uri = sip:${TRUNK_USERNAME}@${TRUNK_HOST}
+;contact_user = ${TRUNK_DID}
+;retry_interval = 60
+;forbidden_retry_interval = 300
+;expiration = 3600
+;line = yes
+;endpoint = carrier
+
+
+; =====================================================================
+;  АГЕНТЫ 101-103 — шаблоны (!) + по три объекта на номер (endpoint/auth/aor)
+;  101, 102 — SIPp-автоответчики из контейнера agents
+;  103      — для живого софтфона (Zoiper, Linphone, MicroSIP...)
+; =====================================================================
+
+[agent-endpoint](!)
+type = endpoint
+transport = transport-udp
+context = from-internal
+disallow = all
+allow = alaw,ulaw
+direct_media = no
+dtmf_mode = rfc4733
+rtp_symmetric = yes
+force_rport = yes
+; занятый агент не получает второй вызов из очереди
+device_state_busy_at = 1
+
+[agent-auth](!)
+type = auth
+auth_type = userpass
+password = ${AGENT_PASSWORD}
+
+[agent-aor](!)
+type = aor
+max_contacts = 1
+remove_existing = yes
+default_expiration = 300
+
+; --- 101, 102: SIPp-агенты ---
+; регистрируются с порта 5070, а звонки ждут на 5060 (указан в Contact),
+; поэтому Contact НЕ переписываем; OPTIONS SIPp-UAS не обрабатывает — qualify выключен
+[101](agent-endpoint)
+auth = 101
+aors = 101
+callerid = "Agent 101" <101>
+[101](agent-auth)
+username = 101
+[101](agent-aor)
+qualify_frequency = 0
+
+[102](agent-endpoint)
+auth = 102
+aors = 102
+callerid = "Agent 102" <102>
+[102](agent-auth)
+username = 102
+[102](agent-aor)
+qualify_frequency = 0
+
+; --- 103: живой софтфон, возможно за NAT ---
+[103](agent-endpoint)
+auth = 103
+aors = 103
+callerid = "Agent 103" <103>
+rewrite_contact = yes
+[103](agent-auth)
+username = 103
+[103](agent-aor)
+qualify_frequency = 30

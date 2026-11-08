@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!--
+  Агент-автоответчик: INVITE -> 180 -> (1 с) -> 200 OK + SDP -> ACK
+  -> "говорит" ~8 с G.711a -> ждёт BYE до 15 с, иначе кладёт трубку сам.
+  CANCEL (очередь сняла вызов до ответа) -> 200 на CANCEL + 487 на INVITE.
+-->
+<scenario name="agent UAS: auto answer">
+
+  <recv request="INVITE" crlf="true" rrs="true">
+    <action>
+      <ereg regexp="^ *(.*)$" search_in="hdr" header="From:" assign_to="junk,caller_from"/>
+      <ereg regexp="^ *(.*)$" search_in="hdr" header="To:" assign_to="junk,caller_to"/>
+      <ereg regexp="^ *([0-9]+)" search_in="hdr" header="CSeq:" assign_to="junk,invite_cseq"/>
+    </action>
+  </recv>
+
+  <send>
+    <![CDATA[
+      SIP/2.0 180 Ringing
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <!-- "агент снимает трубку" через 1 с; если за это время пришёл CANCEL — уходим на cancel -->
+  <recv request="CANCEL" timeout="1000" ontimeout="answer"/>
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+
+    ]]>
+  </send>
+  <send>
+    <![CDATA[
+      SIP/2.0 487 Request Terminated
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      CSeq: [$invite_cseq] INVITE
+      Content-Length: 0
+
+    ]]>
+  </send>
+  <recv request="ACK" next="end"/>
+
+  <label id="answer"/>
+  <send retrans="500">
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[pid]SIPpTag01[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=agent 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 8 101
+      a=rtpmap:8 PCMA/8000
+      a=rtpmap:101 telephone-event/8000
+      a=fmtp:101 0-16
+      a=ptime:20
+      a=sendrecv
+
+    ]]>
+  </send>
+
+  <recv request="ACK" rtd="true" crlf="true"/>
+
+  <nop>
+    <action>
+      <exec play_pcap_audio="pcap/g711a.pcap"/>
+    </action>
+  </nop>
+
+  <recv request="BYE" timeout="15000" ontimeout="agent_bye"/>
+  <send next="end">
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <label id="agent_bye"/>
+  <send retrans="500">
+    <![CDATA[
+      BYE [next_url] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: [$caller_to];tag=[pid]SIPpTag01[call_number]
+      To: [$caller_from]
+      [last_Call-ID:]
+      CSeq: 1 BYE
+      Contact: <sip:[local_ip]:[local_port];transport=[transport]>
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+  <recv response="200" crlf="true"/>
+
+  <label id="end"/>
+
+  <ResponseTimeRepartition value="10, 20, 50, 100, 200, 500"/>
+  <CallLengthRepartition value="1000, 5000, 10000, 20000"/>
+</scenario>

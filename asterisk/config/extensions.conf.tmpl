@@ -1,0 +1,133 @@
+; =====================================================================
+;  Диалплан прототипа call-центра
+;
+;  from-trunk     входящие от провайдера -> рабочее время -> IVR
+;  ivr-main       голосовое меню: 1 продажи, 2 поддержка, 0 оператор, 9 повтор
+;  queue-route    вход в очередь с таймаутом и обработкой результата
+;  from-internal  агенты: внутренние, исходящие через транк (9 + номер), сервисные коды
+;
+;  TRUNK_DID, OFFICE_HOURS, OUTBOUND_CALLERID подставляются из .env при старте (entrypoint.sh).
+; =====================================================================
+
+[general]
+static = yes
+writeprotect = yes
+; не пытаться звонить в несуществующий extension: сразу отбой
+autofallthrough = yes
+
+[globals]
+OPERATOR = PJSIP/103
+QUEUE_TIMEOUT = 120
+IVR_MAX_TRIES = 3
+
+
+; ---------------------------------------------------------------------
+;  ВХОДЯЩИЕ С ТРАНКА
+; ---------------------------------------------------------------------
+[from-trunk]
+exten => ${TRUNK_DID},1,NoOp(Inbound: ${CALLERID(num)} -> DID ${EXTEN})
+ same => n,Set(CDR(userfield)=did-${EXTEN})
+ same => n,GotoIfTime(${OFFICE_HOURS}?ivr-main,s,1)
+ same => n,Goto(after-hours,s,1)
+
+; любой другой DID — не наш номер
+exten => _X.,1,NoOp(Unknown DID ${EXTEN} from ${CALLERID(num)})
+ same => n,Hangup(1)
+
+
+[after-hours]
+exten => s,1,Answer()
+ same => n,Wait(0.5)
+ same => n,Playback(custom/ivr-closed)
+ same => n,Hangup()
+
+
+; ---------------------------------------------------------------------
+;  IVR
+; ---------------------------------------------------------------------
+[ivr-main]
+exten => s,1,Answer()
+ same => n,Wait(0.5)
+ same => n,Set(TRIES=0)
+ ; Background, а не Playback: цифру можно нажать, не дослушав приветствие
+ same => n,Background(custom/ivr-welcome)
+ same => n(menu),Set(TRIES=$[${TRIES} + 1])
+ same => n,Background(custom/ivr-main)
+ same => n,WaitExten(5)
+
+exten => 1,1,Gosub(queue-route,s,1(sales,custom/queue-sales))
+exten => 2,1,Gosub(queue-route,s,1(support,custom/queue-support))
+
+; оператор: звоним напрямую, при неответе — в очередь поддержки
+exten => 0,1,NoOp(IVR: operator)
+ same => n,Dial(${OPERATOR},20,tT)
+ same => n,Gosub(queue-route,s,1(support,custom/queue-support))
+
+exten => 9,1,Goto(s,menu)
+
+; i — неверная цифра, t — тишина после меню
+exten => i,1,Playback(custom/ivr-invalid)
+ same => n,Goto(retry,1)
+exten => t,1,Goto(retry,1)
+
+exten => retry,1,GotoIf($[${TRIES} >= ${IVR_MAX_TRIES}]?bye,1)
+ same => n,Goto(s,menu)
+
+exten => bye,1,Playback(custom/ivr-goodbye)
+ same => n,Hangup()
+
+
+; ---------------------------------------------------------------------
+;  ОЧЕРЕДЬ: ARG1 = имя очереди, ARG2 = приветствие
+;  Результат Queue() — в ${QUEUESTATUS}:
+;  TIMEOUT | FULL | JOINEMPTY | LEAVEEMPTY | JOINUNAVAIL | LEAVEUNAVAIL | CONTINUE
+; ---------------------------------------------------------------------
+[queue-route]
+exten => s,1,NoOp(Queue ${ARG1} for ${CALLERID(num)})
+ same => n,Set(CDR(userfield)=queue-${ARG1})
+ same => n,Playback(${ARG2})
+ ; t — агент может перевести вызов (blind transfer #)
+ same => n,Queue(${ARG1},t,,,${QUEUE_TIMEOUT})
+ ; сюда попадаем, только если агент так и не ответил
+ same => n,NoOp(Queue ${ARG1} result: ${QUEUESTATUS})
+ same => n,Playback(custom/queue-timeout)
+ same => n,Playback(custom/ivr-goodbye)
+ same => n,Hangup()
+
+
+; ---------------------------------------------------------------------
+;  АГЕНТЫ
+; ---------------------------------------------------------------------
+[from-internal]
+; внутренние номера
+exten => _1XX,1,NoOp(Internal ${CALLERID(num)} -> ${EXTEN})
+ same => n,Dial(PJSIP/${EXTEN},30,tT)
+ same => n,Hangup()
+
+; исходящие через транк: 9 + номер (не короче 5 цифр)
+exten => _9XXXXX.,1,NoOp(Outbound ${CALLERID(num)} -> ${EXTEN:1})
+ same => n,Set(CALLERID(num)=${OUTBOUND_CALLERID})
+ same => n,Dial(PJSIP/${EXTEN:1}@carrier,60)
+ same => n,NoOp(Outbound result: ${DIALSTATUS} / ${HANGUPCAUSE})
+ same => n,Hangup()
+
+; тест IVR и очередей изнутри
+exten => 2000,1,Goto(ivr-main,s,1)
+exten => 2001,1,Gosub(queue-route,s,1(sales,custom/queue-sales))
+exten => 2002,1,Gosub(queue-route,s,1(support,custom/queue-support))
+
+; *46 — встать на паузу во всех очередях, *47 — снять с паузы
+exten => *46,1,PauseQueueMember(,PJSIP/${CHANNEL(endpoint)},,manual)
+ same => n,NoOp(Pause: ${PQMSTATUS})
+ same => n,Playback(beep)
+ same => n,Hangup()
+exten => *47,1,UnpauseQueueMember(,PJSIP/${CHANNEL(endpoint)})
+ same => n,NoOp(Unpause: ${UPQMSTATUS})
+ same => n,Playback(beep)
+ same => n,Hangup()
+
+; эхо-тест: проверка звука и задержки
+exten => 600,1,Answer()
+ same => n,Playback(demo-echotest)
+ same => n,Echo()
+ same => n,Hangup()

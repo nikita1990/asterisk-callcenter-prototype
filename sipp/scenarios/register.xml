@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!--
+  Регистрация агента: REGISTER -> 401 -> REGISTER с digest -> 200 OK
+  -s <номер>  -au <логин> -ap <пароль>
+  -set contact_port 5060  порт, на котором агента ждёт UAS
+  -set expires 300
+-->
+<scenario name="agent REGISTER with digest auth">
+
+  <!-- задаются снаружи через -set -->
+  <Global variables="contact_port,expires"/>
+
+  <send retrans="500">
+    <![CDATA[
+      REGISTER sip:[remote_ip] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:[service]@[remote_ip]>;tag=[pid]SIPpTag00[call_number]
+      To: <sip:[service]@[remote_ip]>
+      Call-ID: [call_id]
+      CSeq: 1 REGISTER
+      Contact: <sip:[service]@[local_ip]:[$contact_port]>
+      Expires: [$expires]
+      Max-Forwards: 70
+      User-Agent: SIPp-agent
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv response="401" auth="true"/>
+
+  <send retrans="500">
+    <![CDATA[
+      REGISTER sip:[remote_ip] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:[service]@[remote_ip]>;tag=[pid]SIPpTag00[call_number]
+      To: <sip:[service]@[remote_ip]>
+      Call-ID: [call_id]
+      CSeq: 2 REGISTER
+      Contact: <sip:[service]@[local_ip]:[$contact_port]>
+      Expires: [$expires]
+      [authentication]
+      Max-Forwards: 70
+      User-Agent: SIPp-agent
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <recv response="200"/>
+
+</scenario>

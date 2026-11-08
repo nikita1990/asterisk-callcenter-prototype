@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE scenario SYSTEM "sipp.dtd">
+<!--
+  Провайдер передаёт ВХОДЯЩИЙ вызов на DID Asterisk и проходит IVR.
+
+  INVITE sip:<DID>@asterisk -> 100/180 -> 200 OK -> ACK
+  пауза [$wait_ms] (приветствие) -> DTMF [$digits] (RFC 4733)
+  ждём [$hold_ms]: кладёт трубку Asterisk (BYE) — отвечаем 200,
+                   иначе BYE шлём сами.
+
+  Параметры (make call-* задаёт их сам):
+    -s <DID>                  номер, на который звоним
+    -set digits 1             что нажать в меню ("" — ничего, проверка таймаута)
+    -set wait_ms 3000         когда нажимать
+    -set hold_ms 20000        сколько держать вызов
+-->
+<scenario name="carrier UAC: inbound call to DID through IVR">
+
+  <!-- задаются снаружи через -set -->
+  <Global variables="digits,wait_ms,hold_ms"/>
+
+  <send retrans="500">
+    <![CDATA[
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: "Customer" <sip:79161234567@[local_ip]:[local_port]>;tag=[pid]SIPpTag00[call_number]
+      To: <sip:[service]@[remote_ip]:[remote_port]>
+      Call-ID: [call_id]
+      CSeq: 1 INVITE
+      Contact: <sip:79161234567@[local_ip]:[local_port];transport=[transport]>
+      Max-Forwards: 70
+      Subject: SIPp inbound test
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=carrier 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 8 0 101
+      a=rtpmap:8 PCMA/8000
+      a=rtpmap:0 PCMU/8000
+      a=rtpmap:101 telephone-event/8000
+      a=fmtp:101 0-16
+      a=ptime:20
+      a=sendrecv
+
+    ]]>
+  </send>
+
+  <recv response="100" optional="true"/>
+  <recv response="180" optional="true"/>
+  <recv response="183" optional="true"/>
+  <recv response="200" rtd="true" rrs="true"/>
+
+  <send>
+    <![CDATA[
+      ACK [next_url] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      [last_From:]
+      [last_To:]
+      [routes]
+      Call-ID: [call_id]
+      CSeq: 1 ACK
+      Contact: <sip:79161234567@[local_ip]:[local_port];transport=[transport]>
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <!-- слушаем приветствие -->
+  <pause variable="wait_ms"/>
+
+  <!-- нажимаем цифру(ы) меню: 250 мс на тон, payload 101 как в SDP -->
+  <nop>
+    <action>
+      <exec play_dtmf="[$digits],250,101"/>
+    </action>
+  </nop>
+
+  <!-- Asterisk кладёт трубку сам (неверный выбор, таймаут очереди)? -->
+  <recv request="BYE" timeout="[$hold_ms]" ontimeout="caller_bye"/>
+  <send next="end">
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+
+    ]]>
+  </send>
+
+  <!-- поговорили — кладём трубку -->
+  <label id="caller_bye"/>
+  <send retrans="500">
+    <![CDATA[
+      BYE [next_url] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      [last_From:]
+      [last_To:]
+      [routes]
+      Call-ID: [call_id]
+      CSeq: 2 BYE
+      Contact: <sip:79161234567@[local_ip]:[local_port];transport=[transport]>
+      Max-Forwards: 70
+      Content-Length: 0
+
+    ]]>
+  </send>
+  <recv response="200" crlf="true"/>
+
+  <label id="end"/>
+
+  <ResponseTimeRepartition value="10, 20, 50, 100, 200, 500"/>
+  <CallLengthRepartition value="1000, 5000, 10000, 20000, 60000"/>
+</scenario>

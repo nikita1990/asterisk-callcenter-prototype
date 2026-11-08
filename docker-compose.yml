@@ -1,0 +1,64 @@
+# Прототип call-центра на Asterisk 22 (сборка из исходников) + SIPp-провайдер + SIPp-агенты
+#
+#   carrier 172.30.0.20 ──SIP-транк──> asterisk 172.30.0.10 <──REGISTER/INVITE── agents 172.30.0.31 (101, 102)
+#                                              ▲
+#                                              └── живой софтфон как 103 (опционально)
+name: asterisk-prototype
+
+networks:
+  voip:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+x-sipp: &sipp
+  build: ./sipp
+  image: asterisk-prototype/sipp:3.8.0
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    asterisk:
+      condition: service_healthy
+
+services:
+  asterisk:
+    build: ./asterisk
+    image: asterisk-prototype/asterisk:22
+    env_file: .env
+    networks:
+      voip:
+        ipv4_address: 172.30.0.10
+    volumes:
+      - ./asterisk/config:/etc/asterisk-src:ro   # конфиги правятся на хосте, make reload
+      - ./logs:/var/log/asterisk                  # queue_log, CDR (cdr-csv/Master.csv), messages
+    ports:
+      # для живого софтфона (103) через Docker Desktop; в OrbStack можно звонить прямо на 172.30.0.10
+      - "127.0.0.1:5060:5060/udp"
+      - "127.0.0.1:10000-10099:10000-10099/udp"
+    cap_add: [NET_ADMIN, NET_RAW]                 # sngrep внутри контейнера
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "asterisk", "-rx", "core show uptime"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  carrier:
+    <<: *sipp
+    command: ["carrier.sh"]
+    environment:
+      SIPP_IP: 172.30.0.20
+    networks:
+      voip:
+        ipv4_address: 172.30.0.20
+
+  agents:
+    <<: *sipp
+    command: ["agents.sh"]
+    environment:
+      SIPP_IP: 172.30.0.31
+      ASTERISK_HOST: 172.30.0.10
+      AGENTS: "101 102"
+    networks:
+      voip:
+        ipv4_address: 172.30.0.31
