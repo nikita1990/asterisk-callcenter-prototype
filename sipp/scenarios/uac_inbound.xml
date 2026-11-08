@@ -80,6 +80,16 @@
     </action>
   </nop>
 
+  <!-- "Звонящий говорит": иначе RTP к агенту идёт в одну сторону.
+       Asterisk в бридже пересылает агенту только то, что получил от звонящего.
+       Ждём приветствие очереди и ответ агента (~6 с), играем ~4.7 с G.711a. -->
+  <pause milliseconds="6000"/>
+  <nop>
+    <action>
+      <exec play_pcap_audio="pcap/g711a.pcap"/>
+    </action>
+  </nop>
+
   <!-- Asterisk кладёт трубку сам (неверный выбор, таймаут очереди)? -->
   <recv request="BYE" timeout="[$hold_ms]" ontimeout="caller_bye"/>
   <send next="end">

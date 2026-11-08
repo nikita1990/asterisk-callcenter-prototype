@@ -22,7 +22,7 @@ RUN cmake . -DUSE_PCAP=1 -DUSE_GSL=1 -DUSE_SSL=1 && make -j"$(nproc)" sipp
 
 FROM debian:${DEBIAN_RELEASE}-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpcap0.8 libncurses6 libssl3 libgsl27 \
+        libpcap0.8 libncursesw6 libssl3 libgsl27 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /usr/src/sipp/sipp /usr/local/bin/sipp
 COPY --from=build /usr/src/sipp/pcap /opt/sipp/pcap

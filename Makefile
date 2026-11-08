@@ -68,7 +68,7 @@ call-load:       ## 3 одновременных звонка в sales при 2 
 
 call-out:        ## исходящий через транк (9 + номер): 401 -> digest -> 200
 	$(AST) "channel originate Local/979001234567@from-internal application Playback demo-congrats"
-	@sleep 12; $(DC) logs --tail=60 carrier | grep -E 'INVITE sip|SIP/2.0 [0-9]+|Authorization|P-Asserted|BYE sip' || true
+	@sleep 12; $(DC) logs --since 30s --no-log-prefix carrier | grep -E 'INVITE sip|SIP/2.0 [0-9]+|Authorization|P-Asserted|BYE sip' || true
 
 pause-101:       ## поставить агента 101 на паузу во всех очередях
 	$(AST) "queue pause member PJSIP/101"

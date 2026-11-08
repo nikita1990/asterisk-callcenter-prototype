@@ -44,4 +44,4 @@ if [ "${1:-}" = "render" ]; then
 fi
 
 prepare_dirs
-exec asterisk -f -U asterisk -G asterisk -vvv
+exec asterisk -f -n -U asterisk -G asterisk -vvv

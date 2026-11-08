@@ -45,7 +45,7 @@ RUN make menuselect.makeopts \
 
 RUN make -j"$(nproc)" \
     && make install DESTDIR=/opt/staging \
-    && rm -rf /opt/staging/usr/include
+    && rm -rf /opt/staging/usr/include /opt/staging/var/run
 
 ############################ 2. prompts ############################
 # Подсказки IVR синтезируются из текста (prompts/prompts.txt) при сборке.
